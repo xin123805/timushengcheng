@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>增强版热力学题目生成系统</title>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --background-color: #f8f9fa;
+            --accent-color: #4a90e2;
+            --expert-color: #e63946;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 1000px;
+            margin: 2rem auto;
+            padding: 20px;
+            background: var(--background-color);
+            color: var(--primary-color);
+        }
+        .difficulty-picker {
+            text-align: center;
+            margin: 1rem 0;
+        }
+        .difficulty-picker button {
+            margin: 0 5px;
+            padding: 8px 20px;
+            border-radius: 20px;
+            border: 1px solid var(--accent-color);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .difficulty-picker button.active {
+            background: var(--accent-color);
+            color: white;
+        }
+        #question {
+            margin: 2rem 0;
+            padding: 25px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            line-height: 1.8;
+            font-size: 1.1em;
+        }
+        .solution-step {
+            padding: 15px;
+            margin: 10px 0;
+            background: #e8f4ff;
+            border-left: 4px solid var(--accent-color);
+            border-radius: 6px;
+        }
+        .experimental-design {
+            background: #fff3e0;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 8px;
+        }
+        .answer-container {
+            margin: 1rem 0;
+            padding: 0 15px;
+            background: #f1f3f5;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            max-height: 0;
+            overflow: hidden;
+            opacity: 0;
+        }
+        .answer-container.visible {
+            max-height: 600px;
+            opacity: 1;
+            padding: 15px;
+        }
+        /* 其余样式保持原有设置 */
+    </style>
+</head>
+<body>
+    <h1 style="text-align: center; margin-bottom: 1rem;">增强版热力学题目系统</h1>
+    <div class="difficulty-picker">
+        <button onclick="appController.setDifficulty('basic')" class="active">基础模式</button>
+        <button onclick="appController.setDifficulty('advanced')">进阶模式</button>
+        <button onclick="appController.setDifficulty('expert')">专家模式</button>
+    </div>
+    <div id="question"></div>
+    <button class="answer-toggle" onclick="toggleAnswer()">显示答案</button>
+    <div class="answer-container" id="answerBox"></div>
+    <div class="hint">提示：按空格键刷新题目 | 双击题目查看解析</div>
+
+<script>
+// 增强版热力学引擎
+const thermodynamicsEngine = (() => {
+    const processes = {
+        '等温膨胀': {
+            difficulty: ['basic'],
+            params: ['n', 'V'],
+            formula: (p) => 8.314 * p.n * Math.log(p.V2/p.V),
+            question: (p) => {
+                p.V2 = p.V * (p.difficulty === 'expert' ? 5 : 2);
+                return `某理想气体（n=${p.n} mol）经历等温膨胀，初始体积V₁=${p.V} L，膨胀至V₂=${p.V2} L。求熵变ΔS。（R=8.314 J/mol·K）`;
+            },
+            solution: (p) => [
+                `步骤1：应用等温过程熵变公式 ΔS = nRln(V₂/V₁)`,
+                `步骤2：代入数值 ΔS = ${p.n}×8.314×ln(${p.V2}/${p.V})`,
+                `步骤3：计算结果 ΔS = ${(8.314 * p.n * Math.log(p.V2/p.V)).toFixed(2)} J/K`
+            ]
+        },
+        '卡诺循环': {
+            difficulty: ['advanced', 'expert'],
+            params: ['T1', 'T2'],
+            formula: (p) => ({
+                efficiency: (1 - p.T2/p.T1).toFixed(3),
+                heatFlow: `Q1 = W / (1 - ${p.T2}/${p.T1})`
+            }),
+            question: (p) => `卡诺热机工作于${p.T1}K高温源与${p.T2}K低温源之间：
+                a) 计算理论最大效率
+                b) 若输出${p.W}kJ功，求高温源需提供多少热量`,
+            solution: (p) => [
+                `a) 效率η = 1 - T₂/T₁ = 1 - ${p.T2}/${p.T1} = ${(1 - p.T2/p.T1).toFixed(3)}`,
+                `b) Q₁ = W/η = ${p.W*1000}J / ${(1 - p.T2/p.T1).toFixed(3)} = ${(p.W*1000/(1 - p.T2/p.T1)).toFixed(1)}J`
+            ]
+        },
+        '实际气体': {
+            difficulty: ['expert'],
+            params: ['P', 'V', 'T'],
+            formula: (p) => (p.P * p.V)/(8.314 * p.T),
+            question: (p) => `使用范德华方程计算${p.n}mol ${p.gas}在${p.T}K时的修正压强（a=${p.a} Pa·m⁶/mol²，b=${p.b} m³/mol）`,
+            solution: (p) => [
+                `范德华方程：[P + a(n/V)²](V/n - b) = RT`,
+                `变形得：P = [RT/(V/n - b)] - a(n/V)²`,
+                `代入数值计算得：P = ${p.result} Pa`
+            ]
+        }
+    };
+
+    const generateParams = (difficulty) => {
+        const config = {
+            basic: { V: [10,50], T: [273,300], n: [1,3] },
+            advanced: { V: [50,200], T: [300,500], n: [3,6] },
+            expert: { V: [100,500], T: [500,1000], n: [5,10] }
+        };
+        const range = config[difficulty];
+        
+        return {
+            n: Math.floor(Math.random()*(range.n[1]-range.n[0]+1) + range.n[0]),
+            V: Math.floor(Math.random()*(range.V[1]-range.V[0]+1) + range.V[0]),
+            T: Math.floor(Math.random()*(range.T[1]-range.T[0]+1) + range.T[0]),
+            W: Math.floor(Math.random()*50 + 10),
+            gas: ['氧气', '氮气', '二氧化碳'][Math.floor(Math.random()*3)],
+            a: (Math.random()*0.5 + 0.1).toFixed(3),
+            b: (Math.random()*0.0001 + 0.00001).toFixed(6)
+        };
+    };
+
+    return {
+        generateQuestion(difficulty) {
+            const availableProcesses = Object.keys(processes).filter(p => 
+                processes[p].difficulty.includes(difficulty)
+            );
+            const process = availableProcesses[Math.floor(Math.random()*availableProcesses.length)];
+            const params = { ...generateParams(difficulty), difficulty };
+            
+            const result = processes[process].formula(params);
+            return {
+                process,
+                question: processes[process].question(params),
+                solution: processes[process].solution?.(params) || [],
+                result: typeof result === 'object' ? 
+                    Object.entries(result).map(([k,v]) => `${k} = ${v}`).join('\n') : 
+                    `ΔS = ${result.toFixed(2)} J/K`,
+                type: process === '实际气体' ? 'expert' : difficulty
+            };
+        }
+    };
+})();
+
+// 增强交互控制器
+const appController = {
+    currentDifficulty: 'basic',
+    
+    init() {
+        this.setDifficulty('basic');
+        document.addEventListener('keydown', this.handleKeyPress.bind(this));
+        document.getElementById('question').ondblclick = () => this.showSolution();
+    },
+
+    setDifficulty(level) {
+        this.currentDifficulty = level;
+        document.querySelectorAll('.difficulty-picker button').forEach(btn => {
+            btn.classList.toggle('active', btn.textContent.includes(level));
+        });
+        this.generateNewQuestion();
+    },
+
+    handleKeyPress(e) {
+        if (e.code === 'Space') {
+            e.preventDefault();
+            this.generateNewQuestion();
+        }
+    },
+
+    generateNewQuestion() {
+        try {
+            const { question, result, solution, type } = thermodynamicsEngine.generateQuestion(this.currentDifficulty);
+            let displayText = question;
+            
+            this.currentAnswer = {
+                basic: `答案：${result}`,
+                advanced: `分步解答：\n${solution.join('\n')}`,
+                expert: `专家解析：\n${solution.join('\n\n')}`
+            }[type];
+
+            this.displayQuestion(displayText);
+            this.resetAnswerDisplay();
+        } catch (error) {
+            console.error('生成题目时出错:', error);
+        }
+    },
+
+    displayQuestion(text) {
+        const container = document.getElementById('question');
+        container.innerHTML = text
+            .replace(/\n/g, '<br>')
+            .replace(/Δ([A-Z])/g, '<span class="highlight">Δ$1</span>')
+            .replace(/(η|Q|W)/g, '<span class="highlight">$1</span>')
+            .replace(/(\d)(kJ|Pa)/g, '$1<sup>$2</sup>');
+    },
+
+    showSolution() {
+        const answerBox = document.getElementById('answerBox');
+        answerBox.innerHTML = this.currentAnswer
+            .split('\n')
+            .map(line => line.startsWith('步骤') ? 
+                `<div class="solution-step">${line}</div>` : line)
+            .join('<br>');
+        answerBox.classList.add('visible');
+    },
+
+    resetAnswerDisplay() {
+        const answerBox = document.getElementById('answerBox');
+        answerBox.classList.remove('visible');
+        answerBox.innerHTML = '';
+    }
+};
+
+// 全局函数
+function toggleAnswer() {
+    const answerBox = document.getElementById('answerBox');
+    answerBox.classList.toggle('visible');
+    answerBox.innerHTML = answerBox.classList.contains('visible') ? 
+        appController.currentAnswer.replace(/\n/g, '<br>') : '';
+}
+
+// 启动应用
+window.addEventListener('DOMContentLoaded', () => appController.init());
+</script>
+</body>
+</html>
